@@ -144,8 +144,12 @@ class handler(BaseHTTPRequestHandler):
 
         if token and chat_id and text == "/ping":
             try:
-                _send(token, chat_id, "pong ✅")
-                result = b'{"ok":true,"debug":"sent"}'
+                r = req.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": "pong"},
+                    timeout=10,
+                )
+                result = json.dumps({"ok": True, "tg": r.json()}).encode()
             except Exception as e:
                 result = json.dumps({"ok": False, "debug": str(e)}).encode()
         elif not token:
