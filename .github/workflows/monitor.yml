@@ -20,9 +20,11 @@ jobs:
         run: pip install requests python-dotenv
 
       - name: storage_state.json 복원
+        env:
+          STORAGE_STATE: ${{ secrets.STORAGE_STATE }}
         run: |
           mkdir -p .codex-state
-          echo '${{ secrets.STORAGE_STATE }}' > .codex-state/storage_state.json
+          python -c "import os; open('.codex-state/storage_state.json','w').write(os.environ['STORAGE_STATE'])"
 
       - name: .env 생성
         run: |
