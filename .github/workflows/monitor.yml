@@ -1,0 +1,39 @@
+name: 연수원 빈자리 감시
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # 5분마다 실행
+  workflow_dispatch:         # 수동 실행 버튼
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: pip install requests python-dotenv
+
+      - name: storage_state.json 복원
+        run: |
+          mkdir -p .codex-state
+          echo '${{ secrets.STORAGE_STATE }}' > .codex-state/storage_state.json
+
+      - name: .env 생성
+        run: |
+          cat <<EOF > .env
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
+          YEONSU_BASE_URL=https://yeonsu.eseoul.go.kr
+          YEONSU_RESORTS=${{ secrets.YEONSU_RESORTS }}
+          YEONSU_ROOM_TYPES=A,B,C,O
+          POLL_INTERVAL_SECONDS=60
+          EOF
+
+      - name: 빈자리 체크
+        run: python -m yeonsu_monitor check
