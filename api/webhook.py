@@ -142,7 +142,12 @@ class handler(BaseHTTPRequestHandler):
 
         result = b'{"ok":true}'
 
-        if token and chat_id and text == "/check":
+        if token and chat_id and text == "/ping":
+            try:
+                _send(token, chat_id, "pong ✅")
+            except Exception:
+                pass
+        elif token and chat_id and text == "/check":
             try:
                 resort_dates = check_availability()
                 msg = _build_message(resort_dates)
