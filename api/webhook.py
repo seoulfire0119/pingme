@@ -142,21 +142,7 @@ class handler(BaseHTTPRequestHandler):
 
         result = b'{"ok":true}'
 
-        if token and chat_id and text == "/ping":
-            try:
-                r = req.post(
-                    f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": chat_id, "text": "pong"},
-                    timeout=10,
-                )
-                result = json.dumps({"ok": True, "tg": r.json()}).encode()
-            except Exception as e:
-                result = json.dumps({"ok": False, "debug": str(e)}).encode()
-        elif not token:
-            result = b'{"ok":false,"debug":"no_token"}'
-        elif not chat_id:
-            result = b'{"ok":false,"debug":"no_chat_id"}'
-        elif token and chat_id and text == "/check":
+        if token and chat_id and text == "/check":
             try:
                 resort_dates = check_availability()
                 msg = _build_message(resort_dates)
