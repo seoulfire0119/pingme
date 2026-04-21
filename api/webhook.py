@@ -145,8 +145,13 @@ class handler(BaseHTTPRequestHandler):
         if token and chat_id and text == "/ping":
             try:
                 _send(token, chat_id, "pong ✅")
-            except Exception:
-                pass
+                result = b'{"ok":true,"debug":"sent"}'
+            except Exception as e:
+                result = json.dumps({"ok": False, "debug": str(e)}).encode()
+        elif not token:
+            result = b'{"ok":false,"debug":"no_token"}'
+        elif not chat_id:
+            result = b'{"ok":false,"debug":"no_chat_id"}'
         elif token and chat_id and text == "/check":
             try:
                 resort_dates = check_availability()
