@@ -6,8 +6,6 @@ from collections import defaultdict
 from datetime import date as date_cls, datetime
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
 from .config import Config, Target
 from .telegram import send_telegram
 
@@ -169,6 +167,7 @@ def run_monitor(config: Config, test_mode: bool = False) -> None:
     previous = _load_previous_snapshot(snapshot_path)
     last_daily_date: str | None = None
 
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(storage_state=str(state_path) if state_path.exists() else None)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from playwright.sync_api import sync_playwright
-
 from .config import Config
 
 
@@ -11,6 +9,7 @@ def login_and_save_session(config: Config) -> None:
 
     state_path = config.storage_dir / "storage_state.json"
 
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
