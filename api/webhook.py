@@ -135,26 +135,28 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"ok":true}')
-
         message = body.get("message", {})
         text = (message.get("text") or "").strip()
         chat_id = str(message.get("chat", {}).get("id", ""))
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
-        if not token or not chat_id:
-            return
+        result = b'{"ok":true}'
 
-        if text == "/check":
+        if token and chat_id and text == "/check":
             try:
-                _send(token, chat_id, "🔍 조회 중...")
                 resort_dates = check_availability()
-                _send(token, chat_id, _build_message(resort_dates))
+                msg = _build_message(resort_dates)
             except Exception as e:
-                _send(token, chat_id, f"⚠️ 오류: {e}")
+                msg = f"⚠️ 오류: {e}"
+            try:
+                _send(token, chat_id, msg)
+            except Exception:
+                pass
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(result)
 
     def log_message(self, *args):
         pass
