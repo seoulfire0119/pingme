@@ -1,12 +1,12 @@
-name: Yeonsu vacancy monitor
+name: Yeonsu daily summary
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 jobs:
-  check:
+  summary:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,14 +29,6 @@ jobs:
       - name: Install Playwright browsers
         run: playwright install --with-deps chromium
 
-      - name: Restore monitor state
-        uses: actions/cache@v4
-        with:
-          path: .codex-state/snapshot.json
-          key: yeonsu-vacancy-state-${{ github.run_id }}
-          restore-keys: |
-            yeonsu-vacancy-state-
-
       - name: Create env file
         run: |
           cat > .env <<'ENVEOF'
@@ -53,5 +45,5 @@ jobs:
       - name: Login
         run: python -m yeonsu_monitor login
 
-      - name: Run vacancy check
-        run: python -m yeonsu_monitor check
+      - name: Send daily summary
+        run: python -m yeonsu_monitor summary

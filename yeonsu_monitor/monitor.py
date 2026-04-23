@@ -1,34 +1,18 @@
 from __future__ import annotations
 
 import json
-import time
 from collections import defaultdict
-from datetime import date as date_cls, datetime
+from datetime import date as date_cls
 from pathlib import Path
 
 from .config import Config, Target
 from .telegram import send_telegram
 
+
 def _goto_entry_page(page, url: str) -> None:
-    # The site can keep background scripts alive for a long time, so avoid waiting for
-    # the full load event and move on as soon as the navigation commits.
+    # The target site can keep background scripts active for a long time, so
+    # only wait for the navigation to commit.
     page.goto(url, wait_until="commit", timeout=120000)
-
-
-_RESORT_NAMES = {
-    "00003002": "속초연수원",
-    "00003003": "서천연수원",
-    "00003004": "수안보연수원",
-    "00003005": "제주연수원",
-    "00003006": "통영마리나연수원",
-    "00003008": "경주연수원",
-    "00003009": "엘리시안강촌연수원",
-    "00003010": "블룸비스타연수원",
-    "00003011": "여수히든베이연수원",
-    "00003012": "여수베네치아연수원",
-}
-
-_WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
 
 
 def _load_previous_snapshot(path: Path) -> dict[str, object]:
@@ -41,8 +25,21 @@ def _save_snapshot(path: Path, snapshot: dict[str, object]) -> None:
     path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _should_send_vacancy_alert(snapshot_path: Path, resort_dates: dict[str, list[str]]) -> bool:
+    """Persist the latest vacancy snapshot and return True only when it changed."""
+    if not resort_dates:
+        return False
+
+    previous = _load_previous_snapshot(snapshot_path)
+    if previous.get("last_vacancy") == resort_dates:
+        return False
+
+    previous["last_vacancy"] = resort_dates
+    _save_snapshot(snapshot_path, previous)
+    return True
+
+
 def _fetch_room_list(page, base_url: str, yeonsu_gbn: str, year_month: str) -> dict:
-    """브라우저 page.evaluate()로 AJAX 호출 — 실제 브라우저 컨텍스트 사용."""
     result = page.evaluate(
         """async ([base, gbn, ym]) => {
             const resp = await fetch(base + '/onlineRsv/rsvRoomList', {
@@ -61,8 +58,6 @@ def _fetch_room_list(page, base_url: str, yeonsu_gbn: str, year_month: str) -> d
     if result.strip().startswith("<script>location.href='/main';</script>"):
         raise RuntimeError("Login session expired or missing.")
     return json.loads(result)
-
-
 
 
 def _matches_target(item: dict, target: Target) -> bool:
@@ -93,28 +88,27 @@ def _has_available_slot(data: dict, target: Target) -> bool:
 
 def _date_label(date_str: str) -> str:
     d = date_cls.fromisoformat(date_str)
-    return f"{d.month}/{d.day}({_WEEKDAY_KR[d.weekday()]})"
+    return f"{d.month}/{d.day}"
 
 
 def _send_resort_summary(config: Config, resort_dates: dict[str, list[str]], test_mode: bool) -> None:
-    """resort_dates: {연수원명: [가능날짜, ...]} — 가능한 연수원만 포함"""
-    prefix = "🔍 [테스트] " if test_mode else ""
+    prefix = "[TEST] " if test_mode else ""
     if resort_dates:
-        lines = [f"{prefix}✅ 빈자리 현황\n"]
+        lines = [f"{prefix}Vacancy summary"]
         for resort_name, dates in resort_dates.items():
             date_labels = ", ".join(_date_label(d) for d in sorted(dates))
-            lines.append(f"📍 {resort_name}: {date_labels}")
-        lines.append("\n👉 https://yeonsu.eseoul.go.kr/onlineRsv/list")
+            lines.append(f"- {resort_name}: {date_labels}")
+        lines.append("")
+        lines.append("https://yeonsu.eseoul.go.kr/onlineRsv/list")
     else:
-        lines = [f"{prefix}빈자리 없음"]
+        lines = [f"{prefix}No vacancies"]
     try:
         send_telegram(config.telegram_bot_token, config.telegram_chat_id, "\n".join(lines))
     except Exception as e:
-        print(f"[텔레그램 전송 실패] {e}")
+        print(f"[telegram error] {e}")
 
 
 def _poll_once(page, config: Config) -> dict[str, list[str]]:
-    """API 한 사이클 호출 후 resort_name → [available dates] 반환."""
     groups: dict[tuple[str, str], list[Target]] = {}
     for target in config.targets:
         groups.setdefault((target.yeonsu_gbn, target.year_month), []).append(target)
@@ -124,14 +118,12 @@ def _poll_once(page, config: Config) -> dict[str, list[str]]:
         data = _fetch_room_list(page, config.base_url, yeonsu_gbn, year_month)
         for target in targets:
             if _has_available_slot(data, target):
-                resort = _RESORT_NAMES.get(target.yeonsu_gbn, target.yeonsu_gbn)
-                resort_dates[resort].append(target.date)
+                resort_dates[yeonsu_gbn].append(target.date)
 
     return dict(resort_dates)
 
 
 def _poll_once_local(config: Config) -> dict[str, list[str]]:
-    """로컬 실행용 — Playwright로 세션 로드 후 조회."""
     from playwright.sync_api import sync_playwright
 
     state_path = config.storage_dir / "storage_state.json"
@@ -146,11 +138,12 @@ def _poll_once_local(config: Config) -> dict[str, list[str]]:
 
 
 def run_check(config: Config) -> None:
-    """현재 현황을 즉시 텔레그램으로 전송하고 종료 (Playwright 기반)."""
+    """Free-only mode: run once and send a notification only when vacancies changed."""
     from playwright.sync_api import sync_playwright
 
     state_path = config.storage_dir / "storage_state.json"
-    print("현황 조회 중...", flush=True)
+    snapshot_path = config.storage_dir / "snapshot.json"
+    print("Checking vacancies...", flush=True)
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -158,79 +151,55 @@ def run_check(config: Config) -> None:
                 args=["--no-sandbox", "--disable-setuid-sandbox"],
             )
             context = browser.new_context(
-                storage_state=str(state_path),
+                storage_state=str(state_path) if state_path.exists() else None,
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
             page = context.new_page()
             _goto_entry_page(page, f"{config.base_url}/main")
             resort_dates = _poll_once(page, config)
             browser.close()
-        _send_resort_summary(config, resort_dates, test_mode=False)
-        print("전송 완료.")
+
+        if _should_send_vacancy_alert(snapshot_path, resort_dates):
+            _send_resort_summary(config, resort_dates, test_mode=False)
+            print("Vacancy alert sent.", flush=True)
+        else:
+            print("No new vacancy.", flush=True)
     except Exception as e:
-        print(f"[오류] {e}", flush=True)
+        print(f"[error] {e}", flush=True)
         try:
-            send_telegram(config.telegram_bot_token, config.telegram_chat_id, f"⚠️ 조회 실패: {e}")
+            send_telegram(config.telegram_bot_token, config.telegram_chat_id, f"Check failed: {e}")
         except Exception:
             pass
         raise
 
 
-def run_monitor(config: Config, test_mode: bool = False) -> None:
-    state_path = config.storage_dir / "storage_state.json"
-    snapshot_path = config.storage_dir / "snapshot.json"
-    previous = _load_previous_snapshot(snapshot_path)
-    last_daily_date: str | None = None
-
+def run_summary(config: Config) -> None:
+    """Free-only mode: send one daily summary at 11 AM KST."""
     from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-        context = browser.new_context(
-            storage_state=str(state_path) if state_path.exists() else None,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        )
-        page = context.new_page()
-        _goto_entry_page(page, f"{config.base_url}/main")
 
-        while True:
-            now = datetime.now()
-            mode = " [테스트모드]" if test_mode else ""
-            print(f"[{now.strftime('%H:%M:%S')}] 체크 시작...{mode}", flush=True)
+    state_path = config.storage_dir / "storage_state.json"
+    print("Sending daily summary...", flush=True)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"],
+            )
+            context = browser.new_context(
+                storage_state=str(state_path) if state_path.exists() else None,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            )
+            page = context.new_page()
+            _goto_entry_page(page, f"{config.base_url}/main")
+            resort_dates = _poll_once(page, config)
+            browser.close()
 
-            try:
-                resort_dates = _poll_once(page, config)
-            except RuntimeError as e:
-                if "Login session expired" in str(e):
-                    print("[오류] 로그인 세션이 만료됐습니다.")
-                    try:
-                        send_telegram(
-                            config.telegram_bot_token,
-                            config.telegram_chat_id,
-                            "⚠️ 세션 만료\n로그인 후 storage_state.json을 갱신하고 watch를 다시 실행해주세요.",
-                        )
-                    except Exception:
-                        pass
-                    break
-                raise
-
-            has_any = bool(resort_dates)
-            print(f"  빈자리: {list(resort_dates.keys()) if has_any else '없음'}", flush=True)
-
-            # 빈자리 새로 발생 시 즉시 알림
-            if has_any and previous.get("last_vacancy") != resort_dates:
-                previous["last_vacancy"] = resort_dates
-                _save_snapshot(snapshot_path, previous)
-                _send_resort_summary(config, resort_dates, test_mode=False)
-
-            # 테스트 모드: 매 사이클 전송
-            if test_mode:
-                _send_resort_summary(config, resort_dates, test_mode=True)
-
-            # 매일 오전 11시 정기 요약
-            today_str = now.strftime("%Y-%m-%d")
-            if now.hour == 11 and last_daily_date != today_str:
-                last_daily_date = today_str
-                print("[오전 11시 정기 알림 전송]", flush=True)
-                _send_resort_summary(config, resort_dates, test_mode=False)
-
-            time.sleep(config.poll_interval_seconds)
+        _send_resort_summary(config, resort_dates, test_mode=False)
+        print("Daily summary sent.", flush=True)
+    except Exception as e:
+        print(f"[error] {e}", flush=True)
+        try:
+            send_telegram(config.telegram_bot_token, config.telegram_chat_id, f"Summary failed: {e}")
+        except Exception:
+            pass
+        raise
