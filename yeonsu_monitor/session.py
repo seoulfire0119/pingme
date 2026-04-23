@@ -45,7 +45,11 @@ def login_and_save_session(config: Config) -> None:
         page.on("request", lambda r: post_requests.append(f"POST {r.url}") if r.method == "POST" else None)
 
         print("사이트 접속 중...")
-        page.goto(f"{config.base_url}/main", wait_until="networkidle", timeout=60000)
+        page.goto(f"{config.base_url}/main", wait_until="commit", timeout=120000)
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
 
         print("로그인 모달 열기...")
         page.evaluate("login()")

@@ -9,6 +9,12 @@ from pathlib import Path
 from .config import Config, Target
 from .telegram import send_telegram
 
+def _goto_entry_page(page, url: str) -> None:
+    # The site can keep background scripts alive for a long time, so avoid waiting for
+    # the full load event and move on as soon as the navigation commits.
+    page.goto(url, wait_until="commit", timeout=120000)
+
+
 _RESORT_NAMES = {
     "00003002": "속초연수원",
     "00003003": "서천연수원",
@@ -133,7 +139,7 @@ def _poll_once_local(config: Config) -> dict[str, list[str]]:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(storage_state=str(state_path))
         page = context.new_page()
-        page.goto(f"{config.base_url}/main", wait_until="domcontentloaded", timeout=60000)
+        _goto_entry_page(page, f"{config.base_url}/main")
         result = _poll_once(page, config)
         browser.close()
     return result
@@ -156,7 +162,7 @@ def run_check(config: Config) -> None:
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
             page = context.new_page()
-            page.goto(f"{config.base_url}/main", wait_until="domcontentloaded", timeout=60000)
+            _goto_entry_page(page, f"{config.base_url}/main")
             resort_dates = _poll_once(page, config)
             browser.close()
         _send_resort_summary(config, resort_dates, test_mode=False)
@@ -184,7 +190,7 @@ def run_monitor(config: Config, test_mode: bool = False) -> None:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         )
         page = context.new_page()
-        page.goto(f"{config.base_url}/main", wait_until="domcontentloaded", timeout=60000)
+        _goto_entry_page(page, f"{config.base_url}/main")
 
         while True:
             now = datetime.now()
