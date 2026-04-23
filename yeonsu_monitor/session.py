@@ -11,12 +11,12 @@ def login_and_save_session(config: Config) -> None:
 
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
         context = browser.new_context()
         page = context.new_page()
 
         print("사이트 접속 중...")
-        page.goto(f"{config.base_url}/main", wait_until="load", timeout=60000)
+        page.goto(f"{config.base_url}/main", wait_until="networkidle", timeout=60000)
 
         print("로그인 모달 열기...")
         page.evaluate("login()")
@@ -26,12 +26,12 @@ def login_and_save_session(config: Config) -> None:
         page.fill("#mbmr_pwd", config.password)
         page.click("#loginBtn")
 
-        # 모달이 닫히거나 페이지가 이동할 때까지 대기
-        page.wait_for_timeout(3000)
-
-        # 로그인 실패 시 모달이 여전히 보임
-        modal_still_visible = page.is_visible("#mbmr_id")
-        if modal_still_visible:
+        # 모달이 사라질 때까지 최대 10초 대기
+        try:
+            page.wait_for_selector("#mbmr_id", state="hidden", timeout=10000)
+        except Exception:
+            print(f"[디버그] 현재 URL: {page.url}", flush=True)
+            print(f"[디버그] 페이지 제목: {page.title()}", flush=True)
             raise RuntimeError("로그인 실패. 아이디/비밀번호를 확인해주세요.")
 
         context.storage_state(path=str(state_path))
