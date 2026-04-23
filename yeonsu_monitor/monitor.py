@@ -39,6 +39,11 @@ def _fetch_room_list(context, base_url: str, yeonsu_gbn: str, year_month: str) -
     response = context.request.post(
         f"{base_url}/onlineRsv/rsvRoomList",
         form={"parameter": yeonsu_gbn, "year_month": year_month},
+        headers={
+            "Referer": f"{base_url}/onlineRsv/list",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        },
     )
     text = response.text()
     if text.strip().startswith("<script>location.href='/main';</script>"):
@@ -121,8 +126,14 @@ def run_check(config: Config) -> None:
     print("현황 조회 중...", flush=True)
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(storage_state=str(state_path))
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"],
+            )
+            context = browser.new_context(
+                storage_state=str(state_path),
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            )
             resort_dates = _poll_once(context, config)
             browser.close()
         _send_resort_summary(config, resort_dates, test_mode=False)
