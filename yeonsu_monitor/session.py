@@ -18,6 +18,10 @@ def login_and_save_session(config: Config) -> None:
         print("사이트 접속 중...")
         page.goto(f"{config.base_url}/main", wait_until="networkidle", timeout=60000)
 
+        # alert 팝업 자동 수락 + 텍스트 캡처
+        alert_messages: list[str] = []
+        page.on("dialog", lambda d: (alert_messages.append(d.message), d.accept()))
+
         print("로그인 모달 열기...")
         page.evaluate("login()")
         page.wait_for_selector("#mbmr_id", state="visible", timeout=10000)
@@ -26,12 +30,27 @@ def login_and_save_session(config: Config) -> None:
         page.fill("#mbmr_pwd", config.password)
         page.click("#loginBtn")
 
-        # 모달이 사라질 때까지 최대 10초 대기
+        # 네트워크 응답 대기
         try:
-            page.wait_for_selector("#mbmr_id", state="hidden", timeout=10000)
+            page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
-            print(f"[디버그] 현재 URL: {page.url}", flush=True)
-            print(f"[디버그] 페이지 제목: {page.title()}", flush=True)
+            pass
+
+        # 모달이 사라졌는지 확인
+        if page.is_visible("#mbmr_id"):
+            # 사이트 오류 메시지 수집
+            for sel in ["#errMsg", ".err_msg", ".login_err", ".alert", ".modal .error", ".pop .msg"]:
+                try:
+                    el = page.locator(sel)
+                    if el.is_visible():
+                        print(f"[디버그] 오류 메시지({sel}): {el.text_content()}", flush=True)
+                except Exception:
+                    pass
+            # alert 다이얼로그 텍스트 캡처용 - 이미 닫혔을 수 있음
+            if alert_messages:
+                print(f"[디버그] Alert 팝업: {alert_messages}", flush=True)
+            print(f"[디버그] 아이디 입력값 확인: {page.input_value('#mbmr_id')}", flush=True)
+            print(f"[디버그] URL: {page.url}", flush=True)
             raise RuntimeError("로그인 실패. 아이디/비밀번호를 확인해주세요.")
 
         context.storage_state(path=str(state_path))
