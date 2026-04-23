@@ -8,6 +8,21 @@ from pathlib import Path
 from .config import Config, Target
 from .telegram import send_telegram
 
+_RESORT_NAMES = {
+    "00003002": "속초연수원",
+    "00003003": "서천연수원",
+    "00003004": "수안보연수원",
+    "00003005": "제주연수원",
+    "00003006": "통영마리나연수원",
+    "00003008": "경주연수원",
+    "00003009": "엘리시안강촌연수원",
+    "00003010": "블룸비스타연수원",
+    "00003011": "여수히든베이연수원",
+    "00003012": "여수베네치아연수원",
+}
+
+_WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+
 
 def _goto_entry_page(page, url: str) -> None:
     # The target site can keep background scripts active for a long time, so
@@ -88,7 +103,7 @@ def _has_available_slot(data: dict, target: Target) -> bool:
 
 def _date_label(date_str: str) -> str:
     d = date_cls.fromisoformat(date_str)
-    return f"{d.month}/{d.day}"
+    return f"{d.month}/{d.day}({_WEEKDAY_KR[d.weekday()]})"
 
 
 def _send_resort_summary(config: Config, resort_dates: dict[str, list[str]], test_mode: bool) -> None:
@@ -97,7 +112,8 @@ def _send_resort_summary(config: Config, resort_dates: dict[str, list[str]], tes
         lines = [f"{prefix}Vacancy summary"]
         for resort_name, dates in resort_dates.items():
             date_labels = ", ".join(_date_label(d) for d in sorted(dates))
-            lines.append(f"- {resort_name}: {date_labels}")
+            display_name = _RESORT_NAMES.get(resort_name, resort_name)
+            lines.append(f"- {display_name}: {date_labels}")
         lines.append("")
         lines.append("https://yeonsu.eseoul.go.kr/onlineRsv/list")
     else:
