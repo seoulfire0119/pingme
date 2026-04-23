@@ -55,24 +55,26 @@ def _should_send_vacancy_alert(snapshot_path: Path, resort_dates: dict[str, list
 
 
 def _fetch_room_list(page, base_url: str, yeonsu_gbn: str, year_month: str) -> dict:
-    result = page.evaluate(
-        """async ([base, gbn, ym]) => {
-            const resp = await fetch(base + '/onlineRsv/rsvRoomList', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'application/json, text/javascript, */*; q=0.01'
-                },
-                body: 'parameter=' + encodeURIComponent(gbn) + '&year_month=' + encodeURIComponent(ym)
-            });
-            return await resp.text();
-        }""",
-        [base_url, yeonsu_gbn, year_month],
+    response = page.request.post(
+        f"{base_url}/onlineRsv/rsvRoomList",
+        headers={
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        },
+        form={
+            "parameter": yeonsu_gbn,
+            "year_month": year_month,
+        },
+        timeout=30000,
     )
+    result = response.text()
     if result.strip().startswith("<script>location.href='/main';</script>"):
         raise RuntimeError("Login session expired or missing.")
-    return json.loads(result)
+    try:
+        return json.loads(result)
+    except json.JSONDecodeError as e:
+        snippet = result.strip().replace("\n", " ")[:200]
+        raise RuntimeError(f"Unexpected vacancy response ({response.status}): {snippet}") from e
 
 
 def _matches_target(item: dict, target: Target) -> bool:
