@@ -124,6 +124,21 @@ def _poll_once(page, config: Config) -> dict[str, list[str]]:
     return dict(resort_dates)
 
 
+def _poll_once_local(config: Config) -> dict[str, list[str]]:
+    """로컬 실행용 — Playwright로 세션 로드 후 조회."""
+    from playwright.sync_api import sync_playwright
+
+    state_path = config.storage_dir / "storage_state.json"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(storage_state=str(state_path))
+        page = context.new_page()
+        page.goto(f"{config.base_url}/main", wait_until="domcontentloaded", timeout=60000)
+        result = _poll_once(page, config)
+        browser.close()
+    return result
+
+
 def run_check(config: Config) -> None:
     """현재 현황을 즉시 텔레그램으로 전송하고 종료 (Playwright 기반)."""
     from playwright.sync_api import sync_playwright

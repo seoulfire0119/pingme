@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .bot import run_bot
 from .config import load_config
 from .monitor import run_check, run_monitor
 from .session import login_and_save_session
@@ -17,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser = sub.add_parser("watch", help="실시간 감시 시작 (빈자리 즉시 알림 + 매일 오전 11시 요약)")
     watch_parser.add_argument("--test", action="store_true", help="매 사이클마다 전체 현황 텔레그램 전송 (테스트용)")
     sub.add_parser("check", help="지금 즉시 현황 조회 후 텔레그램 전송")
+    sub.add_parser("bot", help="텔레그램 봇 실행 — /check 명령 수신 시 현황 조회")
     sub.add_parser("chat-id", help="텔레그램 chat ID 확인")
     return parser
 
@@ -36,6 +38,10 @@ def main() -> None:
 
     if args.command == "check":
         run_check(config)
+        return
+
+    if args.command == "bot":
+        run_bot(config)
         return
 
     if args.command == "chat-id":
