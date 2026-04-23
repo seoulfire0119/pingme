@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
@@ -20,27 +20,30 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
-      - name: Restore storage state
-        env:
-          STORAGE_STATE: ${{ secrets.STORAGE_STATE }}
-        run: |
-          if [ -z "$STORAGE_STATE" ]; then
-            echo "Missing STORAGE_STATE secret"
-            exit 1
-          fi
-          mkdir -p .codex-state
-          printf '%s' "$STORAGE_STATE" > .codex-state/storage_state.json
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
 
       - name: Create env file
         run: |
-          cat > .env <<EOF
+          cat > .env <<'ENVEOF'
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
           YEONSU_BASE_URL=https://yeonsu.eseoul.go.kr
-          YEONSU_RESORTS=${{ secrets.YEONSU_RESORTS }}
+          YEONSU_USERNAME=${{ secrets.YEONSU_USERNAME }}
+          YEONSU_PASSWORD=${{ secrets.YEONSU_PASSWORD }}
+          YEONSU_RESORTS=00003002,00003003,00003004,00003005,00003006,00003008,00003009,00003010,00003011,00003012
           YEONSU_ROOM_TYPES=A,B,C,O
           POLL_INTERVAL_SECONDS=60
-          EOF
+          ENVEOF
+
+      - name: Login
+        run: python -m yeonsu_monitor login
 
       - name: Run check
         run: python -m yeonsu_monitor check

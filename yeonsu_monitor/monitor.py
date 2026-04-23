@@ -46,17 +46,6 @@ def _fetch_room_list(context, base_url: str, yeonsu_gbn: str, year_month: str) -
     return response.json()
 
 
-def _fetch_room_list_requests(session, base_url: str, yeonsu_gbn: str, year_month: str) -> dict:
-    import requests as req_lib
-    response = session.post(
-        f"{base_url}/onlineRsv/rsvRoomList",
-        data={"parameter": yeonsu_gbn, "year_month": year_month},
-        timeout=15,
-    )
-    text = response.text
-    if text.strip().startswith("<script>location.href='/main';</script>"):
-        raise RuntimeError("Login session expired or missing.")
-    return response.json()
 
 
 def _matches_target(item: dict, target: Target) -> bool:
@@ -124,41 +113,27 @@ def _poll_once(context, config: Config) -> dict[str, list[str]]:
     return dict(resort_dates)
 
 
-def _poll_once_requests(config: Config) -> dict[str, list[str]]:
-    """requests 기반 폴링 — Playwright 불필요, GitHub Actions용."""
-    import json
-    import requests
+def run_check(config: Config) -> None:
+    """현재 현황을 즉시 텔레그램으로 전송하고 종료 (Playwright 기반)."""
+    from playwright.sync_api import sync_playwright
 
     state_path = config.storage_dir / "storage_state.json"
-    if not state_path.exists():
-        raise RuntimeError(f"storage_state.json 없음: {state_path}")
-
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    session = requests.Session()
-    for cookie in state.get("cookies", []):
-        session.cookies.set(cookie["name"], cookie["value"])
-
-    groups: dict[tuple[str, str], list[Target]] = {}
-    for target in config.targets:
-        groups.setdefault((target.yeonsu_gbn, target.year_month), []).append(target)
-
-    resort_dates: dict[str, list[str]] = defaultdict(list)
-    for (yeonsu_gbn, year_month), targets in groups.items():
-        data = _fetch_room_list_requests(session, config.base_url, yeonsu_gbn, year_month)
-        for target in targets:
-            if _has_available_slot(data, target):
-                resort = _RESORT_NAMES.get(target.yeonsu_gbn, target.yeonsu_gbn)
-                resort_dates[resort].append(target.date)
-
-    return dict(resort_dates)
-
-
-def run_check(config: Config) -> None:
-    """현재 현황을 즉시 텔레그램으로 전송하고 종료 (requests 기반)."""
     print("현황 조회 중...", flush=True)
-    resort_dates = _poll_once_requests(config)
-    _send_resort_summary(config, resort_dates, test_mode=False)
-    print("전송 완료.")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(storage_state=str(state_path))
+            resort_dates = _poll_once(context, config)
+            browser.close()
+        _send_resort_summary(config, resort_dates, test_mode=False)
+        print("전송 완료.")
+    except Exception as e:
+        print(f"[오류] {e}", flush=True)
+        try:
+            send_telegram(config.telegram_bot_token, config.telegram_chat_id, f"⚠️ 조회 실패: {e}")
+        except Exception:
+            pass
+        raise
 
 
 def run_monitor(config: Config, test_mode: bool = False) -> None:
