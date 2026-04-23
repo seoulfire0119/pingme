@@ -20,7 +20,12 @@ def login_and_save_session(config: Config) -> None:
         )
         page = context.new_page()
         # 자동화 감지 우회
-        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){}, app: {} };
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['ko-KR', 'ko', 'en-US']});
+        """)
 
         # alert 팝업 자동 수락 + 텍스트 캡처
         alert_messages: list[str] = []
