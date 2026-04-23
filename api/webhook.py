@@ -6,7 +6,6 @@ import json
 import os
 
 import requests as req
-from playwright.sync_api import sync_playwright
 
 RESORT_NAMES = {
     "00003002": "문학수련관",
@@ -31,6 +30,10 @@ ROOM_FIELDS = {
 REQUEST_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "application/json, text/javascript, */*; q=0.01",
+}
+LOGIN_HEADERS = {
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": f"{BASE_URL}/loginLayer",
 }
 
 
@@ -59,50 +62,81 @@ def _target_days(year_month: str) -> list[str]:
     return days
 
 
-def _fetch(request_context, gbn: str, ym: str) -> tuple[str, str, dict]:
-    response = request_context.post(
-        "/onlineRsv/rsvRoomList",
-        headers=REQUEST_HEADERS,
-        form={"parameter": gbn, "year_month": ym},
-        timeout=15000,
+def _seed_session_from_state(session: req.Session, raw_state: str) -> None:
+    state = json.loads(raw_state)
+    for cookie in state.get("cookies", []):
+        session.cookies.set(cookie["name"], cookie["value"])
+
+
+def _login_session(session: req.Session) -> None:
+    username = os.environ.get("YEONSU_USERNAME", "")
+    password = os.environ.get("YEONSU_PASSWORD", "")
+    if not username or not password:
+        raise RuntimeError("YEONSU_USERNAME 또는 YEONSU_PASSWORD가 없습니다.")
+
+    session.get(f"{BASE_URL}/loginLayer", timeout=20)
+    response = session.post(
+        f"{BASE_URL}/loginProcAjax",
+        data={"mbmr_id": username, "mbmr_pwd": password},
+        headers=LOGIN_HEADERS,
+        timeout=20,
     )
-    body = response.text()
+    payload = response.json()
+    if payload.get("result") not in {"success", "pwdNextChange"}:
+        raise RuntimeError(f"로그인 실패: {payload.get('result', 'unknown')}")
+
+
+def _ensure_authenticated_session() -> req.Session:
+    session = req.Session()
+    raw_state = os.environ.get("STORAGE_STATE", "")
+    if raw_state:
+        try:
+            _seed_session_from_state(session, raw_state)
+        except Exception:
+            session.cookies.clear()
+
+    try:
+        _fetch(session, "00003002", _current_months()[0])
+    except RuntimeError as e:
+        if "로그인 세션이 만료되었습니다." not in str(e):
+            raise
+        session = req.Session()
+        _login_session(session)
+
+    return session
+
+
+def _fetch(session: req.Session, gbn: str, ym: str) -> tuple[str, str, dict]:
+    response = session.post(
+        f"{BASE_URL}/onlineRsv/rsvRoomList",
+        headers=REQUEST_HEADERS,
+        data={"parameter": gbn, "year_month": ym},
+        timeout=15,
+    )
+    body = response.text
     if body.strip().startswith("<script>location.href='/main';</script>"):
         raise RuntimeError("로그인 세션이 만료되었습니다.")
     try:
         return gbn, ym, json.loads(body)
     except json.JSONDecodeError as e:
         snippet = body.strip().replace("\n", " ")[:200]
-        raise RuntimeError(f"예상치 못한 응답 ({response.status}): {snippet}") from e
+        raise RuntimeError(f"예상치 못한 응답 ({response.status_code}): {snippet}") from e
 
 
 def check_availability() -> dict[str, list[str]]:
-    raw = os.environ.get("STORAGE_STATE", "")
-    if not raw:
-        raise RuntimeError("STORAGE_STATE 환경변수 없음")
-
-    state = json.loads(raw)
     months = _current_months()
     resorts = list(RESORT_NAMES.keys())
     tasks = [(r, m) for r in resorts for m in months]
 
     data_map: dict[tuple[str, str], dict] = {}
     errors: list[str] = []
-    with sync_playwright() as p:
-        request_context = p.request.new_context(
-            base_url=BASE_URL,
-            storage_state=state,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        )
+    session = _ensure_authenticated_session()
+    for gbn, ym in tasks:
         try:
-            for gbn, ym in tasks:
-                try:
-                    key_gbn, key_ym, data = _fetch(request_context, gbn, ym)
-                    data_map[(key_gbn, key_ym)] = data
-                except Exception as e:
-                    errors.append(f"{gbn}/{ym}: {e}")
-        finally:
-            request_context.dispose()
+            key_gbn, key_ym, data = _fetch(session, gbn, ym)
+            data_map[(key_gbn, key_ym)] = data
+        except Exception as e:
+            errors.append(f"{gbn}/{ym}: {e}")
 
     if errors and not data_map:
         raise RuntimeError("빈자리 조회 실패: " + "; ".join(errors[:3]))
