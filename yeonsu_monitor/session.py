@@ -19,7 +19,6 @@ def login_and_save_session(config: Config) -> None:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         )
         page = context.new_page()
-        # 자동화 감지 우회
         page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){}, app: {} };
@@ -27,15 +26,12 @@ def login_and_save_session(config: Config) -> None:
             Object.defineProperty(navigator, 'languages', {get: () => ['ko-KR', 'ko', 'en-US']});
         """)
 
-        # alert 팝업 자동 수락 + 텍스트 캡처
         alert_messages: list[str] = []
         page.on("dialog", lambda d: (alert_messages.append(d.message), d.accept()))
 
-        # 로그인 관련 네트워크 요청 캡처
-        login_requests: list[str] = []
-        login_responses: list[str] = []
-        page.on("request", lambda r: login_requests.append(f"{r.method} {r.url}") if "login" in r.url.lower() else None)
-        page.on("response", lambda r: login_responses.append(f"{r.status} {r.url}") if "login" in r.url.lower() else None)
+        # 모든 POST 요청 캡처 (실제 로그인 엔드포인트 찾기용)
+        post_requests: list[str] = []
+        page.on("request", lambda r: post_requests.append(f"{r.method} {r.url}") if r.method == "POST" else None)
 
         print("사이트 접속 중...")
         page.goto(f"{config.base_url}/main", wait_until="networkidle", timeout=60000)
@@ -48,27 +44,24 @@ def login_and_save_session(config: Config) -> None:
         page.fill("#mbmr_pwd", config.password)
         page.click("#loginBtn")
 
+        print("로그인 처리 대기 중 (NetFunnel 대기열 포함)...")
+        # NetFunnel 대기열 처리를 포함해 최대 40초 대기
         try:
-            page.wait_for_load_state("networkidle", timeout=8000)
+            page.wait_for_selector("#mbmr_id", state="hidden", timeout=40000)
+            # 성공
         except Exception:
-            pass
-
-        # 버튼 클릭 후에도 모달이 살아있으면 Enter 키 재시도
-        if page.is_visible("#mbmr_id"):
-            print("[디버그] 버튼 클릭 후 모달 유지 → Enter 키 시도", flush=True)
-            page.press("#mbmr_pwd", "Enter")
-            try:
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                pass
-
-        if page.is_visible("#mbmr_id"):
-            if alert_messages:
-                print(f"[디버그] Alert 팝업: {alert_messages}", flush=True)
-            print(f"[디버그] 로그인 요청 목록: {login_requests}", flush=True)
-            print(f"[디버그] 로그인 응답 목록: {login_responses}", flush=True)
-            print(f"[디버그] URL: {page.url}", flush=True)
-            raise RuntimeError("로그인 실패. 아이디/비밀번호를 확인해주세요.")
+            # 버튼 클릭이 실패한 경우 Enter 키 재시도
+            if page.is_visible("#mbmr_id"):
+                print("[디버그] Enter 키 재시도...", flush=True)
+                page.press("#mbmr_pwd", "Enter")
+                try:
+                    page.wait_for_selector("#mbmr_id", state="hidden", timeout=40000)
+                except Exception:
+                    if alert_messages:
+                        print(f"[디버그] Alert: {alert_messages}", flush=True)
+                    print(f"[디버그] POST 요청들: {post_requests}", flush=True)
+                    print(f"[디버그] URL: {page.url}", flush=True)
+                    raise RuntimeError("로그인 실패. 아이디/비밀번호를 확인해주세요.")
 
         context.storage_state(path=str(state_path))
         browser.close()
