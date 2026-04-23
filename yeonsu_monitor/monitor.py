@@ -35,20 +35,26 @@ def _save_snapshot(path: Path, snapshot: dict[str, object]) -> None:
     path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _fetch_room_list(context, base_url: str, yeonsu_gbn: str, year_month: str) -> dict:
-    response = context.request.post(
-        f"{base_url}/onlineRsv/rsvRoomList",
-        form={"parameter": yeonsu_gbn, "year_month": year_month},
-        headers={
-            "Referer": f"{base_url}/onlineRsv/list",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-        },
+def _fetch_room_list(page, base_url: str, yeonsu_gbn: str, year_month: str) -> dict:
+    """브라우저 page.evaluate()로 AJAX 호출 — 실제 브라우저 컨텍스트 사용."""
+    result = page.evaluate(
+        """async ([base, gbn, ym]) => {
+            const resp = await fetch(base + '/onlineRsv/rsvRoomList', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json, text/javascript, */*; q=0.01'
+                },
+                body: 'parameter=' + encodeURIComponent(gbn) + '&year_month=' + encodeURIComponent(ym)
+            });
+            return await resp.text();
+        }""",
+        [base_url, yeonsu_gbn, year_month],
     )
-    text = response.text()
-    if text.strip().startswith("<script>location.href='/main';</script>"):
+    if result.strip().startswith("<script>location.href='/main';</script>"):
         raise RuntimeError("Login session expired or missing.")
-    return response.json()
+    return json.loads(result)
 
 
 
@@ -101,7 +107,7 @@ def _send_resort_summary(config: Config, resort_dates: dict[str, list[str]], tes
         print(f"[텔레그램 전송 실패] {e}")
 
 
-def _poll_once(context, config: Config) -> dict[str, list[str]]:
+def _poll_once(page, config: Config) -> dict[str, list[str]]:
     """API 한 사이클 호출 후 resort_name → [available dates] 반환."""
     groups: dict[tuple[str, str], list[Target]] = {}
     for target in config.targets:
@@ -109,7 +115,7 @@ def _poll_once(context, config: Config) -> dict[str, list[str]]:
 
     resort_dates: dict[str, list[str]] = defaultdict(list)
     for (yeonsu_gbn, year_month), targets in groups.items():
-        data = _fetch_room_list(context, config.base_url, yeonsu_gbn, year_month)
+        data = _fetch_room_list(page, config.base_url, yeonsu_gbn, year_month)
         for target in targets:
             if _has_available_slot(data, target):
                 resort = _RESORT_NAMES.get(target.yeonsu_gbn, target.yeonsu_gbn)
@@ -134,7 +140,9 @@ def run_check(config: Config) -> None:
                 storage_state=str(state_path),
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
-            resort_dates = _poll_once(context, config)
+            page = context.new_page()
+            page.goto(f"{config.base_url}/onlineRsv/list", wait_until="networkidle", timeout=30000)
+            resort_dates = _poll_once(page, config)
             browser.close()
         _send_resort_summary(config, resort_dates, test_mode=False)
         print("전송 완료.")
@@ -155,8 +163,13 @@ def run_monitor(config: Config, test_mode: bool = False) -> None:
 
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(storage_state=str(state_path) if state_path.exists() else None)
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+        context = browser.new_context(
+            storage_state=str(state_path) if state_path.exists() else None,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+        page = context.new_page()
+        page.goto(f"{config.base_url}/onlineRsv/list", wait_until="networkidle", timeout=30000)
 
         while True:
             now = datetime.now()
@@ -164,7 +177,7 @@ def run_monitor(config: Config, test_mode: bool = False) -> None:
             print(f"[{now.strftime('%H:%M:%S')}] 체크 시작...{mode}", flush=True)
 
             try:
-                resort_dates = _poll_once(context, config)
+                resort_dates = _poll_once(page, config)
             except RuntimeError as e:
                 if "Login session expired" in str(e):
                     print("[오류] 로그인 세션이 만료됐습니다.")
