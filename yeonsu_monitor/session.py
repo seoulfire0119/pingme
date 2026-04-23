@@ -24,14 +24,25 @@ def login_and_save_session(config: Config) -> None:
             window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){}, app: {} };
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
             Object.defineProperty(navigator, 'languages', {get: () => ['ko-KR', 'ko', 'en-US']});
+            Object.defineProperty(navigator, 'userAgentData', {
+                get: () => ({
+                    brands: [
+                        { brand: 'Not A(Brand', version: '99' },
+                        { brand: 'Google Chrome', version: '124' },
+                        { brand: 'Chromium', version: '124' }
+                    ],
+                    mobile: false,
+                    platform: 'Windows',
+                    getHighEntropyValues: () => Promise.resolve({})
+                })
+            });
         """)
 
         alert_messages: list[str] = []
         page.on("dialog", lambda d: (alert_messages.append(d.message), d.accept()))
 
-        # 모든 POST 요청 캡처 (실제 로그인 엔드포인트 찾기용)
         post_requests: list[str] = []
-        page.on("request", lambda r: post_requests.append(f"{r.method} {r.url}") if r.method == "POST" else None)
+        page.on("request", lambda r: post_requests.append(f"POST {r.url}") if r.method == "POST" else None)
 
         print("사이트 접속 중...")
         page.goto(f"{config.base_url}/main", wait_until="networkidle", timeout=60000)
@@ -42,26 +53,45 @@ def login_and_save_session(config: Config) -> None:
 
         page.fill("#mbmr_id", config.username)
         page.fill("#mbmr_pwd", config.password)
-        page.click("#loginBtn")
 
-        print("로그인 처리 대기 중 (NetFunnel 대기열 포함)...")
-        # NetFunnel 대기열 처리를 포함해 최대 40초 대기
+        # 버튼 정보 확인
+        btn_info = page.evaluate("""() => {
+            const btn = document.getElementById('loginBtn');
+            if (!btn) return {error: 'not found'};
+            return {
+                type: btn.type,
+                disabled: btn.disabled,
+                outerHTML: btn.outerHTML.slice(0, 400)
+            };
+        }""")
+        print(f"[디버그] 로그인 버튼: {btn_info}", flush=True)
+
+        # Playwright click + JS dispatchEvent 모두 시도
+        page.click("#loginBtn")
+        page.evaluate("""
+            document.getElementById('loginBtn').dispatchEvent(
+                new MouseEvent('click', {bubbles: true, cancelable: true, view: window})
+            )
+        """)
+
+        print("로그인 처리 대기 중...")
         try:
             page.wait_for_selector("#mbmr_id", state="hidden", timeout=40000)
-            # 성공
         except Exception:
-            # 버튼 클릭이 실패한 경우 Enter 키 재시도
-            if page.is_visible("#mbmr_id"):
-                print("[디버그] Enter 키 재시도...", flush=True)
-                page.press("#mbmr_pwd", "Enter")
-                try:
-                    page.wait_for_selector("#mbmr_id", state="hidden", timeout=40000)
-                except Exception:
-                    if alert_messages:
-                        print(f"[디버그] Alert: {alert_messages}", flush=True)
-                    print(f"[디버그] POST 요청들: {post_requests}", flush=True)
-                    print(f"[디버그] URL: {page.url}", flush=True)
-                    raise RuntimeError("로그인 실패. 아이디/비밀번호를 확인해주세요.")
+            if alert_messages:
+                print(f"[디버그] Alert: {alert_messages}", flush=True)
+            print(f"[디버그] POST 요청들: {[r for r in post_requests if 'google' not in r]}", flush=True)
+            # 폼 submit 직접 시도
+            print("폼 직접 제출 시도...", flush=True)
+            page.evaluate("""
+                const form = document.querySelector('form');
+                if (form) form.submit();
+            """)
+            try:
+                page.wait_for_selector("#mbmr_id", state="hidden", timeout=15000)
+            except Exception:
+                print(f"[디버그] URL: {page.url}", flush=True)
+                raise RuntimeError("로그인 실패. 아이디/비밀번호를 확인해주세요.")
 
         context.storage_state(path=str(state_path))
         browser.close()
