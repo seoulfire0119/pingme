@@ -141,7 +141,7 @@ def run_check(config: Config) -> None:
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
             page = context.new_page()
-            page.goto(f"{config.base_url}/onlineRsv/list", wait_until="networkidle", timeout=30000)
+            page.goto(f"{config.base_url}/onlineRsv/list", wait_until="load", timeout=30000)
             resort_dates = _poll_once(page, config)
             browser.close()
         _send_resort_summary(config, resort_dates, test_mode=False)
@@ -169,7 +169,7 @@ def run_monitor(config: Config, test_mode: bool = False) -> None:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         )
         page = context.new_page()
-        page.goto(f"{config.base_url}/onlineRsv/list", wait_until="networkidle", timeout=30000)
+        page.goto(f"{config.base_url}/onlineRsv/list", wait_until="load", timeout=30000)
 
         while True:
             now = datetime.now()
