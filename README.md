@@ -33,6 +33,12 @@ Set these secrets in the repository:
 - `python -m yeonsu_monitor check`
 - `python -m yeonsu_monitor summary`
 
+## State Files
+
+- `python -m yeonsu_monitor login` writes the authenticated Playwright session to `.codex-state/storage_state.json`.
+- Vacancy change detection stores the last sent snapshot in `.codex-state/snapshot.json`.
+- These files are reused between runs, so existing local state is preserved unless you delete them manually.
+
 ## Notes
 
 - The vacancy check sends Telegram only when the result changes.
