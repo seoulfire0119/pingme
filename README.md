@@ -39,6 +39,20 @@ Set these secrets in the repository:
 - Vacancy change detection stores the last sent snapshot in `.codex-state/snapshot.json`.
 - These files are reused between runs, so existing local state is preserved unless you delete them manually.
 
+## Troubleshooting
+
+### Login failed with `ReferenceError: login is not defined`
+
+- Cause: the old login flow tried to run `page.evaluate("login()")`, but the Yeonsu page does not expose a global `login()` function.
+- Fix: the login flow now opens `/loginLayer` directly and submits credentials through the real `/loginProcAjax` endpoint.
+- Result: the authenticated cookies are saved into `.codex-state/storage_state.json`, so later runs reuse the existing session instead of starting from scratch.
+
+### Login page opened but no request was sent
+
+- Cause: the site login flow depends on front-end behavior that is brittle in headless automation.
+- Fix: the session helper now performs the login request with `requests`, then stores the returned cookies in Playwright storage state.
+- Result: the login step no longer depends on JavaScript click handlers or NetFunnel timing.
+
 ## Notes
 
 - The vacancy check sends Telegram only when the result changes.
