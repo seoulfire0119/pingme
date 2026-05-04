@@ -27,6 +27,17 @@ ROOM_FIELDS = {
     "C": "ctye_room_num",
     "O": "otye_room_num",
 }
+BLOOMVISTA_GBN = "00003010"
+DEFAULT_TARGET_WEEKDAYS = (calendar.FRIDAY, calendar.SATURDAY, calendar.SUNDAY)
+BLOOMVISTA_TARGET_WEEKDAYS = (
+    calendar.MONDAY,
+    calendar.TUESDAY,
+    calendar.WEDNESDAY,
+    calendar.THURSDAY,
+    calendar.FRIDAY,
+    calendar.SATURDAY,
+    calendar.SUNDAY,
+)
 REQUEST_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -48,12 +59,18 @@ def _current_months() -> list[str]:
     return months
 
 
-def _target_days(year_month: str) -> list[str]:
+def _target_weekdays_for_resort(gbn: str) -> tuple[int, ...]:
+    if gbn == BLOOMVISTA_GBN:
+        return BLOOMVISTA_TARGET_WEEKDAYS
+    return DEFAULT_TARGET_WEEKDAYS
+
+
+def _target_days(year_month: str, gbn: str) -> list[str]:
     year, month = map(int, year_month.split("."))
     today = date.today().isoformat()
     days = []
     for week in calendar.monthcalendar(year, month):
-        for wd in (calendar.FRIDAY, calendar.SATURDAY, calendar.SUNDAY):
+        for wd in _target_weekdays_for_resort(gbn):
             day = week[wd]
             if day != 0:
                 d = f"{year}-{month:02d}-{day:02d}"
@@ -94,6 +111,9 @@ def _ensure_authenticated_session() -> req.Session:
             _seed_session_from_state(session, raw_state)
         except Exception:
             session.cookies.clear()
+    else:
+        _login_session(session)
+        return session
 
     try:
         _fetch(session, "00003002", _current_months()[0])
@@ -145,7 +165,7 @@ def check_availability() -> dict[str, list[str]]:
     for gbn in resorts:
         for ym in months:
             data = data_map.get((gbn, ym), {})
-            for day in _target_days(ym):
+            for day in _target_days(ym, gbn):
                 for item in data.get("rsvPsblList", []):
                     if str(item.get("rming_dt", ""))[:10] == day:
                         for field in ROOM_FIELDS.values():

@@ -29,11 +29,30 @@ class Config:
     storage_dir: Path
 
 
-def _target_days_in_month(year_month: str) -> list[str]:
+_BLOOMVISTA_GBN = "00003010"
+_DEFAULT_TARGET_WEEKDAYS = (calendar.FRIDAY, calendar.SATURDAY, calendar.SUNDAY)
+_BLOOMVISTA_TARGET_WEEKDAYS = (
+    calendar.MONDAY,
+    calendar.TUESDAY,
+    calendar.WEDNESDAY,
+    calendar.THURSDAY,
+    calendar.FRIDAY,
+    calendar.SATURDAY,
+    calendar.SUNDAY,
+)
+
+
+def _target_weekdays_for_resort(resort: str) -> tuple[int, ...]:
+    if resort == _BLOOMVISTA_GBN:
+        return _BLOOMVISTA_TARGET_WEEKDAYS
+    return _DEFAULT_TARGET_WEEKDAYS
+
+
+def _target_days_in_month(year_month: str, weekdays: tuple[int, ...]) -> list[str]:
     year, month = map(int, year_month.split("."))
     result = []
     for week in calendar.monthcalendar(year, month):
-        for weekday in (calendar.FRIDAY, calendar.SATURDAY, calendar.SUNDAY):
+        for weekday in weekdays:
             day = week[weekday]
             if day != 0:
                 result.append(f"{year}-{month:02d}-{day:02d}")
@@ -44,12 +63,13 @@ def _build_targets(months: list[str], resorts: list[str], room_types: tuple[str,
     today = date.today().isoformat()
     targets: list[Target] = []
     for year_month in months:
-        for d in _target_days_in_month(year_month):
-            if d < today:
-                continue
-            for resort in resorts:
+        for resort in resorts:
+            resort = resort.strip()
+            for d in _target_days_in_month(year_month, _target_weekdays_for_resort(resort)):
+                if d < today:
+                    continue
                 targets.append(Target(
-                    yeonsu_gbn=resort.strip(),
+                    yeonsu_gbn=resort,
                     year_month=year_month.strip(),
                     date=d,
                     room_types=room_types,
